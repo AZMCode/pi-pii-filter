@@ -1,0 +1,17 @@
+[project]
+name = "pi-pii-filter"
+version = "1.0.0"
+description = "Pi Agent extension — local PII redaction via openai/privacy-filter"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+    "transformers>=4.30",
+    "torch",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.24",
+    "pytest>=8.0",
+]

@@ -1,0 +1,14 @@
+{
+  "name": "pi-pii-filter",
+  "version": "1.0.0",
+  "description": "Pi Agent extension — local PII redaction via openai/privacy-filter",
+  "type": "commonjs",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "keywords": ["pi-agent", "pii", "privacy", "extension"],
+  "license": "MIT",
+  "devDependencies": {
+    "vitest": "^4.1.5"
+  }
+}
