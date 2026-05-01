@@ -34,7 +34,7 @@ Clone this repo into your Pi project's extensions directory:
 ```bash
 cd your-pi-project
 mkdir -p .pi/extensions
-git clone https://github.com/kentr/pi-pii-filter .pi/extensions/pii-filter
+git clone https://github.com/ssccio/pi-pii-filter .pi/extensions/pii-filter
 ```
 
 Pi auto-discovers extensions in `.pi/extensions/*/index.ts` on startup.
