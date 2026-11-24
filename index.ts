@@ -10,6 +10,7 @@ export interface PiiFilterConfig {
   enabled: boolean;
   logging: boolean;
   modelId: string;
+  ignoreLabels: string[];
 }
 
 export function normalizeConfig(raw: unknown): PiiFilterConfig {
@@ -18,6 +19,9 @@ export function normalizeConfig(raw: unknown): PiiFilterConfig {
     enabled: typeof r.enabled === "boolean" ? r.enabled : false,
     logging: typeof r.logging === "boolean" ? r.logging : false,
     modelId: typeof r.modelId === "string" ? r.modelId : "openai/privacy-filter",
+    ignoreLabels: Array.isArray(r.ignoreLabels)
+      ? r.ignoreLabels.filter((l): l is string => typeof l === "string")
+      : [],
   };
 }
 
@@ -162,6 +166,7 @@ export async function spawnServer(
   projectRoot: string,
   modelId: string,
   port: number,
+  ignoreLabels: string[] = [],
 ): Promise<ServerHandle> {
   const pythonBin = path.join(projectRoot, ".venv", "bin", "python");
   const serverDir = path.join(projectRoot, ".pi", "extensions", "pii-filter");
@@ -170,7 +175,11 @@ export async function spawnServer(
     ["-m", "uvicorn", "server:app", "--port", String(port), "--log-level", "warning"],
     {
       cwd: serverDir,
-      env: { ...process.env, PII_MODEL_ID: modelId },
+      env: {
+        ...process.env,
+        PII_MODEL_ID: modelId,
+        PII_IGNORE_LABELS: ignoreLabels.join(","),
+      },
       stdio: ["ignore", "ignore", "ignore"],
     },
   );
@@ -249,7 +258,7 @@ export default function registerPiiFilter(pi: ExtensionAPI): void {
     ctx.ui.setStatus("pii-filter", "⏳ PII loading...");
     try {
       const port = await findFreePort();
-      serverHandle = await spawnServer(projectRoot, config.modelId, port);
+      serverHandle = await spawnServer(projectRoot, config.modelId, port, config.ignoreLabels);
 
       serverHandle.process.on("exit", () => {
         if (!restartState.disabled && config.enabled) {
@@ -307,12 +316,16 @@ export default function registerPiiFilter(pi: ExtensionAPI): void {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-  const PII_SYSTEM_NOTE = "\n\n[PII Filter active: all personally identifiable information in this conversation has been automatically redacted and replaced with typed placeholders — [private_person], [private_email], [private_phone], [private_address], [private_url], [private_date], [account_number], [secret]. Treat these as intentional redactions of real values, not template artifacts.]";
+  const ALL_LABELS = ["private_person", "private_email", "private_phone", "private_address", "private_url", "private_date", "account_number", "secret"];
+  function piiSystemNote(): string {
+    const active = ALL_LABELS.filter((l) => !config.ignoreLabels.includes(l)).map((l) => `[${l}]`).join(", ");
+    return `\n\n[PII Filter active: all personally identifiable information in this conversation has been automatically redacted and replaced with typed placeholders — ${active}. Treat these as intentional redactions of real values, not template artifacts.]`;
+  }
 
   pi.on("before_agent_start", async (event, _ctx) => {
     loggedMessageCount = 0;
     if (!config.enabled) return;
-    return { systemPrompt: event.systemPrompt + PII_SYSTEM_NOTE };
+    return { systemPrompt: event.systemPrompt + piiSystemNote() };
   });
 
   pi.on("session_start", async (_event, ctx) => {
@@ -410,7 +423,7 @@ export default function registerPiiFilter(pi: ExtensionAPI): void {
       if (cmd.action === "status") {
         const serverStatus = serverHandle ? "running" : "stopped";
         ctx.ui.notify(
-          `PII Filter — enabled: ${config.enabled}, logging: ${config.logging}, server: ${serverStatus}, model: ${config.modelId}`,
+          `PII Filter — enabled: ${config.enabled}, logging: ${config.logging}, server: ${serverStatus}, model: ${config.modelId}, ignoreLabels: ${config.ignoreLabels.join(",") || "none"}`,
           "info",
         );
         return;
