@@ -253,9 +253,15 @@ export default function registerPiiFilter(pi: ExtensionAPI): void {
   async function startServer(
     ctx: { hasUI: boolean; ui: { notify(msg: string, level: string): void; setStatus(id: string, v: string | undefined): void } },
   ): Promise<void> {
-    if (!ctx.hasUI) return;
     serverReady = false;
-    ctx.ui.setStatus("pii-filter", "⏳ PII loading...");
+    // The sidecar must run even without a UI (print/RPC mode); otherwise the
+    // context hook silently passes everything through unredacted.
+    const status = (v: string | undefined) => { if (ctx.hasUI) ctx.ui.setStatus("pii-filter", v); };
+    const notify = (msg: string, level: string) => {
+      if (ctx.hasUI) ctx.ui.notify(msg, level);
+      else console.error(`[pii-filter] ${msg}`);
+    };
+    status("⏳ PII loading...");
     try {
       const port = await findFreePort();
       serverHandle = await spawnServer(projectRoot, config.modelId, port, config.ignoreLabels);
@@ -270,8 +276,8 @@ export default function registerPiiFilter(pi: ExtensionAPI): void {
       if (!ready) {
         killServer(serverHandle);
         serverHandle = null;
-        ctx.ui.setStatus("pii-filter", "⚠ PII");
-        ctx.ui.notify(
+        status("⚠ PII");
+        notify(
           "PII Filter: server did not become ready within 120s. Run /pii on to retry.",
           "warning",
         );
@@ -283,8 +289,8 @@ export default function registerPiiFilter(pi: ExtensionAPI): void {
       errorNotifiedThisSession = false;
       setFooter(ctx as any);
     } catch (err) {
-      ctx.ui.setStatus("pii-filter", "⚠ PII");
-      ctx.ui.notify(`PII Filter: failed to start server — ${String(err)}`, "error");
+      status("⚠ PII");
+      notify(`PII Filter: failed to start server — ${String(err)}`, "error");
       config.enabled = false;
       await saveConfig();
     }
@@ -293,18 +299,23 @@ export default function registerPiiFilter(pi: ExtensionAPI): void {
   function _handleServerExit(ctx: { hasUI: boolean; ui: { notify(msg: string, level: string): void; setStatus(id: string, v: string | undefined): void } }): void {
     serverHandle = null;
     serverReady = false;
+    const status = (v: string | undefined) => { if (ctx.hasUI) ctx.ui.setStatus("pii-filter", v); };
+    const notify = (msg: string, level: string) => {
+      if (ctx.hasUI) ctx.ui.notify(msg, level);
+      else console.error(`[pii-filter] ${msg}`);
+    };
     if (!shouldRestart(restartState)) {
-      ctx.ui.setStatus("pii-filter", "⚠ PII");
-      ctx.ui.notify(
+      status("⚠ PII");
+      notify(
         "PII Filter: server crashed 3 times. Filtering disabled. Run /pii on to re-enable.",
         "error",
       );
       config.enabled = false;
-      saveConfig().catch((e) => ctx.ui.notify(`PII Filter: failed to persist config — ${String(e)}`, "warning"));
+      saveConfig().catch((e) => notify(`PII Filter: failed to persist config — ${String(e)}`, "warning"));
       return;
     }
     restartState = recordRestartAttempt(restartState);
-    ctx.ui.notify(
+    notify(
       `PII Filter: server exited unexpectedly (attempt ${restartState.attempts}/3), restarting in 2s...`,
       "warning",
     );
@@ -339,6 +350,9 @@ export default function registerPiiFilter(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async () => {
+    // Detach the crash-restart handler first: the session ctx is already stale
+    // here, and this exit is intentional.
+    serverHandle?.process.removeAllListeners("exit");
     killServer(serverHandle);
     serverHandle = null;
     serverReady = false;
@@ -359,9 +373,9 @@ export default function registerPiiFilter(pi: ExtensionAPI): void {
     } catch (err) {
       if (!errorNotifiedThisSession) {
         errorNotifiedThisSession = true;
-        if (ctx.hasUI) {
-          ctx.ui.notify(`PII Filter: redact_batch failed (${String(err)}), passing through unredacted`, "warning");
-        }
+        const msg = `PII Filter: redact_batch failed (${String(err)}), passing through unredacted`;
+        if (ctx.hasUI) ctx.ui.notify(msg, "warning");
+        else console.error(`[pii-filter] ${msg}`);
       }
       return;
     }
